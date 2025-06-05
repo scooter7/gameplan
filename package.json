@@ -1,0 +1,31 @@
+{
+  "name": "liferramp360-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@supabase/auth-helpers-nextjs": "^0.10.0",
+    "@supabase/auth-helpers-react": "^0.5.0",
+    "@supabase/supabase-js": "^2.24.0",
+    "next": "13.x",
+    "next-themes": "^0.4.6",
+    "openai": "^4.1.0",
+    "react": "18.x",
+    "react-dom": "18.x",
+    "typescript": "^4.9.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/aspect-ratio": "^0.4.2",
+    "@tailwindcss/forms": "^0.5.10",
+    "@tailwindcss/postcss": "^4.1.8",
+    "@types/node": "^18.16.18",
+    "@types/react": "^18.0.28",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.4",
+    "tailwindcss": "^4.1.8"
+  }
+}

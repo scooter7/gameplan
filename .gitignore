@@ -1,0 +1,41 @@
+# Node modules
+node_modules/
+
+# Local environment variables
+.env.local
+.env.*.local
+
+# Next.js build output
+.next/
+out/
+
+# Production environment variables (if any)
+.env.production.local
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Mac system files
+.DS_Store
+
+# Vercel deployment output
+.vercel/
+
+# Tailwind-generated CSS (if you’re not tracking it)
+public/tailwind.css
+
+# Optional: coverage reports
+coverage/
+
+# Optional: IDE / editor folders
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Optional: OS temporary files
+Thumbs.db
