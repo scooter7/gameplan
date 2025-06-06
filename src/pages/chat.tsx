@@ -5,14 +5,12 @@ import { useRouter } from "next/router";
 import { useUser } from "@supabase/auth-helpers-react";
 import { supabase } from "@/lib/supabaseClient";
 
-// -----------------------------------------------------------------------------
-// 1) Types & Data Structures
-// -----------------------------------------------------------------------------
+// --- Types for Flashcards & Goals ----------------------------------------------
 
 interface MCQ {
   prompt: string;
   options: string[];
-  correct: string; // "a", "b", "c", or "d"
+  correct: string;
 }
 
 interface FlashcardParsed {
@@ -33,13 +31,7 @@ type TextMessage = {
   text: string;
 };
 
-type FlashcardMessage = {
-  sender: "bot";
-  type: "flashcards";
-  flashcards: FlashcardParsed[];
-};
-
-type Message = TextMessage | FlashcardMessage;
+// --- Mapping of Main Topics → Skill Areas --------------------------------------
 
 const skillAreaMap: Record<string, string[]> = {
   Leadership: [
@@ -119,92 +111,70 @@ const skillAreaMap: Record<string, string[]> = {
   ],
 };
 
-// -----------------------------------------------------------------------------
-// 2) ChatPage Component
-// -----------------------------------------------------------------------------
-
 export default function ChatPage() {
   const user = useUser();
   const router = useRouter();
 
+  // 1) Profile loading & name
   const [profileLoading, setProfileLoading] = useState<boolean>(true);
   const [name, setName] = useState<string>("");
 
-  // Show all main topic categories on load:
+  // 2) Preload topic list
   const [availableTopics] = useState<string[]>(Object.keys(skillAreaMap));
 
-  // Stages: loading → selectTopic → selectSkill → confirmGameplan → chat
+  // 3) Conversation stages
   const [stage, setStage] = useState<
     "loading" | "selectTopic" | "selectSkill" | "confirmGameplan" | "chat"
   >("loading");
-
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
 
-  // The conversation thread (text bubbles + flashcards)
-  const [messages, setMessages] = useState<Message[]>([]);
+  // 4) Chat messages & input
+  const [messages, setMessages] = useState<TextMessage[]>([]);
   const [inputText, setInputText] = useState<string>("");
   const [loadingFetch, setLoadingFetch] = useState<boolean>(false);
 
-  // --- NEW STATE for Goals & Flashcard Completion ---
-
-  // 1) The array of goals returned by /api/gameplan, each with an ID + status:
+  // 5) Gameplan: goals & flashcards
   const [currentGoals, setCurrentGoals] = useState<FrontendGoal[]>([]);
-
-  // 2) Which flashcards have been “submitted” (true/false per index):
+  const [parsedFlashcards, setParsedFlashcards] = useState<FlashcardParsed[]>([]);
   const [flashcardsSubmitted, setFlashcardsSubmitted] = useState<boolean[]>(
     []
   );
-
-  // 3) The Supabase‐assigned gameplan ID, so we can mark it “completed” later:
   const [currentGameplanId, setCurrentGameplanId] = useState<string | null>(
     null
   );
-
-  // 4) Whether to show the “I’ve completed this gameplan” button:
   const [showCompletionButton, setShowCompletionButton] = useState(false);
 
-  // ---------------------------------------------------------------------------
-  // 2a) On mount: verify auth and load profile
-  // ---------------------------------------------------------------------------
+  // --- 1) On mount: verify auth & fetch profile ---------------------------------
   useEffect(() => {
-    if (user === undefined) return; // still waiting
-
+    if (user === undefined) return; // still loading
     if (user === null) {
       router.replace("/signin");
       return;
     }
-
     const fetchProfile = async () => {
       const { data: profile, error } = await supabase
         .from("profiles")
         .select("full_name")
         .eq("id", user.id)
         .single();
-
       if (error || !profile) {
         router.replace("/profile");
         return;
       }
-
       setName(profile.full_name);
       setStage("selectTopic");
       setProfileLoading(false);
     };
-
     fetchProfile();
   }, [user, router]);
 
-  // ---------------------------------------------------------------------------
-  // 2b) Helper to append a message
-  // ---------------------------------------------------------------------------
-  const addMessage = useCallback((msg: Message) => {
+  // --- 2) Helper: append message to chat ----------------------------------------
+  const addMessage = useCallback((msg: TextMessage) => {
     setMessages((prev) => [...prev, msg]);
   }, []);
 
-  // ---------------------------------------------------------------------------
-  // 2c) User selects a main topic
-  // ---------------------------------------------------------------------------
+  // --- 3) Handle main topic selection -------------------------------------------
   const handleTopicSelect = async (topic: string) => {
     setSelectedTopic(topic);
     addMessage({ sender: "user", type: "text", text: topic });
@@ -249,9 +219,7 @@ export default function ChatPage() {
     }
   };
 
-  // ---------------------------------------------------------------------------
-  // 2d) User selects a specific skill
-  // ---------------------------------------------------------------------------
+  // --- 4) Handle specific skill selection ---------------------------------------
   const handleSkillSelect = async (skill: string) => {
     setSelectedSkill(skill);
     addMessage({ sender: "user", type: "text", text: skill });
@@ -283,7 +251,7 @@ export default function ChatPage() {
         });
       }
 
-      // Ask Yes/No about a gameplan
+      // Ask Yes/No about creating a gameplan
       addMessage({
         sender: "bot",
         type: "text",
@@ -303,22 +271,18 @@ export default function ChatPage() {
     }
   };
 
-  // ---------------------------------------------------------------------------
-  // 2e) User answers Yes/No to “create a gameplan?”
-  // ---------------------------------------------------------------------------
+  // --- 5) Handle Yes/No decision for gameplan -----------------------------------
   const handleGameplanDecision = (decision: "yes" | "no") => {
     addMessage({ sender: "user", type: "text", text: decision });
-    const wants = decision === "yes";
+    const wantsGameplan = decision === "yes";
 
     setTimeout(() => {
-      if (wants) {
-        // First, insert the “generating…” bubble
+      if (wantsGameplan) {
         addMessage({
           sender: "bot",
           type: "text",
           text: `Great! Generating a week-long game plan for "${selectedSkill}" now...`,
         });
-        // Then call generateGameplan()
         generateGameplan();
       } else {
         addMessage({
@@ -328,12 +292,10 @@ export default function ChatPage() {
         });
         setStage("chat");
       }
-    }, 500);
+    }, 300);
   };
 
-  // ---------------------------------------------------------------------------
-  // 2f) Free‐form chat message
-  // ---------------------------------------------------------------------------
+  // --- 6) Handle free‐form chat from user ----------------------------------------
   const handleChatSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!inputText.trim()) return;
@@ -366,7 +328,7 @@ export default function ChatPage() {
         });
       }
     } catch (error) {
-      console.error("Error in /api/chat (free‐form):", error);
+      console.error("Error in /api/chat (free-form):", error);
       addMessage({
         sender: "bot",
         type: "text",
@@ -377,9 +339,7 @@ export default function ChatPage() {
     }
   };
 
-  // ---------------------------------------------------------------------------
-  // 2g) generateGameplan → insert goals and flashcards, then push messages
-  // ---------------------------------------------------------------------------
+  // --- 7) Generate a gameplan (goals + flashcards) -------------------------------
   const generateGameplan = async () => {
     setLoadingFetch(true);
     try {
@@ -395,20 +355,27 @@ export default function ChatPage() {
       });
 
       const json = await res.json();
-      if ("goals" in json && "flashcards" in json && "gameplanId" in json) {
+      if (
+        typeof json === "object" &&
+        "goals" in json &&
+        "flashcards" in json &&
+        "gameplanId" in json
+      ) {
         const { goals, flashcards, gameplanId } = json as {
           goals: { id: string; description: string }[];
           flashcards: string[];
           gameplanId: string;
         };
 
-        // 1) Build the “goals text” and push it as a bot message
-        const goalsTextLines = goals.map((g, idx) => `\n${idx + 1}. ${g.description}`);
+        // 7a) Add “Here are your goals…” text to chat
+        const goalsTextLines = goals.map(
+          (g, idx) => `\n${idx + 1}. ${g.description}`
+        );
         const goalsText =
           "Here are your goals for the week:" + goalsTextLines.join("");
         addMessage({ sender: "bot", type: "text", text: goalsText });
 
-        // 2) Set currentGoals (with initial status “not-started”)
+        // 7b) Save goals to state (all “not-started”)
         const frontendGoals: FrontendGoal[] = goals.map((g) => ({
           id: g.id,
           description: g.description,
@@ -416,28 +383,22 @@ export default function ChatPage() {
         }));
         setCurrentGoals(frontendGoals);
 
-        // 3) Set up flashcardsSubmitted (all false initially)
+        // 7c) Initialize flashcard flags
         setFlashcardsSubmitted(Array(flashcards.length).fill(false));
 
-        // 4) Parse each raw flashcard string into a FlashcardParsed object
+        // 7d) Parse raw flashcards
         const parsedFCs: FlashcardParsed[] = flashcards.map((raw) =>
           parseFlashcardContent(raw)
         );
 
-        // 5) Push a “flashcards” chat message so UI renders interactive cards
-        addMessage({
-          sender: "bot",
-          type: "flashcards",
-          flashcards: parsedFCs,
-        });
+        // → Log parsed flashcards to console for debugging:
+        console.log("Parsed flashcards:", parsedFCs);
 
-        // 6) Store the Supabase gameplanId
+        setParsedFlashcards(parsedFCs);
+
+        // 7e) Save gameplanId & show “complete” button
         setCurrentGameplanId(gameplanId);
-
-        // 7) Show the “I’ve completed this gameplan” button (initially disabled)
         setShowCompletionButton(true);
-
-        // 8) Switch to “chat” stage so input box appears
         setStage("chat");
       } else {
         addMessage({
@@ -460,9 +421,8 @@ export default function ChatPage() {
     }
   };
 
-  // ---------------------------------------------------------------------------
-  // 2h) Parse raw flashcard string → FlashcardParsed
-  // ---------------------------------------------------------------------------
+  // --- Helper: parse raw flashcard string → structured FlashcardParsed ----------
+
   function parseFlashcardContent(content: string): FlashcardParsed {
     const urlMatch = content.match(
       /https?:\/\/(www\.)?youtube\.com\/watch\?v=[\w-]+/i
@@ -522,16 +482,56 @@ export default function ChatPage() {
     return { videoUrl, descriptionLines, questions };
   }
 
-  // ---------------------------------------------------------------------------
-  // 2i) Handle “I’ve completed this gameplan” button
-  // ---------------------------------------------------------------------------
-  const handleCompleteGameplan = async () => {
-    if (!currentGameplanId || !user) {
-      console.error("No gameplanId or user before completing.");
+  // --- 8) Update goal status (Supabase + local UI) ------------------------------
+
+  const updateGoalStatus = async (
+    goalId: string,
+    newStatus: FrontendGoal["status"]
+  ) => {
+    const { error } = await supabase
+      .from("goals")
+      .update({ status: newStatus })
+      .eq("id", goalId);
+
+    if (error) {
+      console.error("Error updating goal status:", error.message);
+      addMessage({
+        sender: "bot",
+        type: "text",
+        text: "Sorry, I couldn’t update that goal’s status. Please try again.",
+      });
       return;
     }
+    setCurrentGoals((prev) =>
+      prev.map((g) => (g.id === goalId ? { ...g, status: newStatus } : g))
+    );
+  };
 
-    // Mark the gameplan row as completed
+  // --- 9) Mark a flashcard as submitted ------------------------------------------
+
+  const markFlashcardSubmitted = (index: number) => {
+    setFlashcardsSubmitted((prev) => {
+      const copy = [...prev];
+      copy[index] = true;
+      return copy;
+    });
+  };
+
+  // --- 10) Check if all goals & flashcards are done ------------------------------
+
+  const allGoalsCompleted =
+    currentGoals.length > 0 &&
+    currentGoals.every((g) => g.status === "completed");
+  const allFlashcardsDone =
+    flashcardsSubmitted.length > 0 &&
+    flashcardsSubmitted.every((flag) => flag);
+  const canComplete = allGoalsCompleted && allFlashcardsDone;
+
+  // --- 11) Handle “I’ve completed this gameplan” --------------------------------
+
+  const handleCompleteGameplan = async () => {
+    if (!currentGameplanId || !user) return;
+
     const { error } = await supabase
       .from("gameplans")
       .update({ completed: true })
@@ -547,8 +547,9 @@ export default function ChatPage() {
       return;
     }
 
-    // Reset state
+    // Reset entire chat state and go back to topic selection
     setMessages([]);
+    setParsedFlashcards([]);
     setCurrentGameplanId(null);
     setShowCompletionButton(false);
     setCurrentGoals([]);
@@ -556,7 +557,6 @@ export default function ChatPage() {
     setSelectedTopic(null);
     setSelectedSkill(null);
 
-    // Congratulate and ask what to explore next
     setStage("selectTopic");
     addMessage({
       sender: "bot",
@@ -565,181 +565,112 @@ export default function ChatPage() {
     });
   };
 
-  // ---------------------------------------------------------------------------
-  // 2j) Update a goal’s status in Supabase & local state
-  // ---------------------------------------------------------------------------
-  const updateGoalStatus = async (
-    goalId: string,
-    newStatus: FrontendGoal["status"]
-  ) => {
-    // 1) Update in Supabase
-    const { error } = await supabase
-      .from("goals")
-      .update({ status: newStatus })
-      .eq("id", goalId);
-
-    if (error) {
-      console.error("Error updating goal status:", error.message);
-      addMessage({
-        sender: "bot",
-        type: "text",
-        text: "Sorry, I couldn’t update that goal’s status. Please try again.",
-      });
-      return;
-    }
-
-    // 2) Update local state
-    setCurrentGoals((prev) =>
-      prev.map((g) =>
-        g.id === goalId
-          ? { ...g, status: newStatus }
-          : g
-      )
-    );
-  };
-
-  // ---------------------------------------------------------------------------
-  // 2k) Called by each FlashcardCard when submitted
-  // ---------------------------------------------------------------------------
-  const markFlashcardSubmitted = (index: number) => {
-    setFlashcardsSubmitted((prev) => {
-      const copy = [...prev];
-      copy[index] = true;
-      return copy;
-    });
-  };
-
-  // ---------------------------------------------------------------------------
-  // 2l) Check if all goals are “completed”
-  // ---------------------------------------------------------------------------
-  const allGoalsCompleted =
-    currentGoals.length > 0 &&
-    currentGoals.every((g) => g.status === "completed");
-
-  // ---------------------------------------------------------------------------
-  // 2m) Check if all flashcards have been submitted
-  // ---------------------------------------------------------------------------
-  const allFlashcardsDone =
-    flashcardsSubmitted.length > 0 &&
-    flashcardsSubmitted.every((flag) => flag);
-
-  // ---------------------------------------------------------------------------
-  // 2n) Eligibility for “Complete” button
-  // ---------------------------------------------------------------------------
-  const canComplete = allGoalsCompleted && allFlashcardsDone;
-
-  // ---------------------------------------------------------------------------
-  // 2o) If auth or profile still loading, render nothing
-  // ---------------------------------------------------------------------------
+  // If still loading profile or user is null, render nothing
   if (stage === "loading" || profileLoading) {
     return null;
   }
 
-  // ---------------------------------------------------------------------------
-  // 3) Render JSX (Goals panel at top, then conversation/thread)
-  // -----------------------------------------------------------------------------
-  return (
-    <div className="flex flex-col h-screen bg-gray-100">
-      {/* Header */}
-      <header className="bg-indigo-600 text-white p-4">
-        <h1 className="text-xl">AI Coaching Chat</h1>
-      </header>
+  // --- RENDER ---------------------------------------------------------------------
 
-      {/* Main Content */}
-      <main className="flex-1 overflow-auto p-4">
-        {/* 1) Goals Panel (always at top) */}
+  return (
+    <div className="relative min-h-screen bg-liferamp page-container">
+      {/*
+        Everything that follows lives “above” the background image.
+        All interactive UI sits in one .card so it never gets obscured.
+      */}
+      <div className="mx-auto my-6 w-full max-w-4xl card">
+        {/* ---------- HEADER ---------- */}
+        <header className="mb-4">
+          <h1 className="text-2xl font-heading text-secondary-dark">
+            AI Coaching Chat
+          </h1>
+        </header>
+
+        {/* ---------- GOALS PANEL (if any) ---------- */}
         {currentGoals.length > 0 && (
-          <section className="mb-6 bg-white p-4 rounded shadow">
-            <h2 className="text-xl font-medium mb-4">Your Goals</h2>
+          <section className="mb-6">
+            <h2 className="text-xl font-heading text-secondary-dark mb-2">
+              Your Goals
+            </h2>
             <ul className="space-y-4">
               {currentGoals.map((goal) => (
                 <li
                   key={goal.id}
-                  className="flex justify-between items-center border border-gray-200 rounded p-4"
+                  className="flex justify-between items-center bg-surface rounded-lg p-4 shadow-sm"
                 >
-                  <div>
-                    <p className="font-medium">{goal.description}</p>
-                  </div>
-                  <div>
-                    <select
-                      value={goal.status}
-                      onChange={(e) =>
-                        updateGoalStatus(
-                          goal.id,
-                          e.target.value as FrontendGoal["status"]
-                        )
-                      }
-                      className="border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="not-started">Not Started</option>
-                      <option value="in-progress">In Progress</option>
-                      <option value="completed">Completed</option>
-                    </select>
-                  </div>
+                  <span className="font-body text-text-secondary">
+                    {goal.description}
+                  </span>
+                  <select
+                    value={goal.status}
+                    onChange={(e) =>
+                      updateGoalStatus(
+                        goal.id,
+                        e.target.value as FrontendGoal["status"]
+                      )
+                    }
+                    className="input w-auto"
+                  >
+                    <option value="not-started">Not Started</option>
+                    <option value="in-progress">In Progress</option>
+                    <option value="completed">Completed</option>
+                  </select>
                 </li>
               ))}
             </ul>
           </section>
         )}
 
-        {/* 2) Conversation Thread (including flashcards) */}
-        <div className="space-y-4 mb-4">
-          {messages.map((msg, idx) => {
-            if (msg.type === "text") {
-              return (
-                <div
-                  key={idx}
-                  className={`flex ${
-                    msg.sender === "user" ? "justify-end" : "justify-start"
-                  }`}
-                >
-                  <div
-                    className={`rounded-lg px-4 py-2 max-w-xl whitespace-pre-wrap ${
-                      msg.sender === "user"
-                        ? "bg-indigo-600 text-white"
-                        : "bg-white text-gray-800 shadow"
-                    }`}
-                  >
-                    {msg.text}
-                  </div>
-                </div>
-              );
-            } else {
-              // msg.type === "flashcards"
-              return (
-                <div key={idx} className="flex justify-start">
-                  <div className="w-full space-y-8">
-                    {msg.flashcards.map((fc, j) => (
-                      <FlashcardCard
-                        key={j}
-                        fc={fc}
-                        index={j}
-                        onComplete={() => markFlashcardSubmitted(j)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              );
-            }
-          })}
-        </div>
+        {/* ---------- FLASHCARDS SECTION (directly under goals) ---------- */}
+        {parsedFlashcards.length > 0 && (
+          <section className="space-y-8 mb-6">
+            {parsedFlashcards.map((fc, j) => (
+              <FlashcardCard
+                key={j}
+                fc={fc}
+                index={j}
+                onComplete={() => markFlashcardSubmitted(j)}
+              />
+            ))}
+          </section>
+        )}
 
-        {/* 3) “I’ve completed this gameplan” Button */}
+        {/* ---------- CHAT THREAD (narrative + other messages) ---------- */}
+        <section className="space-y-4 mb-6">
+          {messages.map((msg, idx) => (
+            <div
+              key={idx}
+              className={`flex ${
+                msg.sender === "user" ? "justify-end" : "justify-start"
+              }`}
+            >
+              <div
+                className={`rounded-lg px-5 py-3 max-w-xl whitespace-pre-wrap ${
+                  msg.sender === "user"
+                    ? "bg-secondary text-surface"
+                    : "bg-surface text-text-primary shadow"
+                }`}
+              >
+                {msg.text}
+              </div>
+            </div>
+          ))}
+        </section>
+
+        {/* ---------- “I’ve completed this gameplan” BUTTON ---------- */}
         {showCompletionButton && (
           <div className="mb-6 text-center">
             <button
               onClick={handleCompleteGameplan}
               disabled={!canComplete}
-              className={`px-6 py-3 rounded-md text-white ${
-                canComplete
-                  ? "bg-green-600 hover:bg-green-700"
-                  : "bg-gray-400 cursor-not-allowed"
-              } transition`}
+              className={`button ${
+                canComplete ? "button-primary" : "opacity-50 cursor-not-allowed"
+              }`}
             >
               I’ve Completed This Gameplan
             </button>
             {!canComplete && (
-              <p className="mt-2 text-sm text-gray-600">
+              <p className="mt-2 text-sm text-text-secondary">
                 Please mark all goals as “Completed” and submit all flashcards
                 to finish.
               </p>
@@ -747,104 +678,101 @@ export default function ChatPage() {
           </div>
         )}
 
-        {/* 4) Input / Selection Area Based on Stage */}
+        {/* ---------- SELECTION / INPUT AREA BY STAGE ---------- */}
         {stage === "selectTopic" && (
-          <div className="bg-white p-4 rounded shadow mb-4">
-            <h2 className="font-medium mb-2">
+          <section className="mb-6">
+            <h2 className="font-heading text-lg mb-4 text-secondary-dark">
               Hello {name}! What would you like to talk about today?
             </h2>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-4">
               {availableTopics.map((topic) => (
                 <button
                   key={topic}
                   onClick={() => handleTopicSelect(topic)}
                   disabled={loadingFetch}
-                  className="px-4 py-2 bg-indigo-500 text-white rounded hover:bg-indigo-600 transition"
+                  className="button button-primary text-sm"
                 >
                   {topic}
                 </button>
               ))}
             </div>
-          </div>
+          </section>
         )}
 
         {stage === "selectSkill" && selectedTopic && (
-          <div className="bg-white p-4 rounded shadow mb-4">
-            <h2 className="font-medium mb-2">
-              Choose a skill area within "{selectedTopic}"
+          <section className="mb-6">
+            <h2 className="font-heading text-lg mb-4 text-secondary-dark">
+              Choose a skill area within “{selectedTopic}”
             </h2>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-4">
               {skillAreaMap[selectedTopic]?.map((skill) => (
                 <button
                   key={skill}
                   onClick={() => handleSkillSelect(skill)}
                   disabled={loadingFetch}
-                  className="px-4 py-2 bg-indigo-500 text-white rounded hover:bg-indigo-600 transition"
+                  className="button button-primary text-sm"
                 >
                   {skill}
                 </button>
               ))}
             </div>
-          </div>
+          </section>
         )}
 
         {stage === "confirmGameplan" && (
-          <div className="bg-white p-4 rounded shadow mb-4">
-            <h2 className="font-medium mb-4">
+          <section className="mb-6">
+            <h2 className="font-heading text-lg text-secondary-dark mb-4">
               Would you like a week-long game plan for “{selectedSkill}”?
             </h2>
             <div className="flex space-x-4">
               <button
                 onClick={() => handleGameplanDecision("yes")}
                 disabled={loadingFetch}
-                className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition"
+                className="button button-primary"
               >
                 Yes
               </button>
               <button
                 onClick={() => handleGameplanDecision("no")}
                 disabled={loadingFetch}
-                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition"
+                className="button button-secondary"
               >
                 No
               </button>
             </div>
-          </div>
+          </section>
         )}
 
         {stage === "chat" && (
-          <form onSubmit={handleChatSubmit} className="mt-4">
-            <div className="flex space-x-2">
+          <form
+            onSubmit={handleChatSubmit}
+            className="fixed bottom-6 left-1/2 transform -translate-x-1/2 w-full max-w-2xl px-4"
+          >
+            <div className="flex">
               <input
                 type="text"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 placeholder="Type your message..."
-                className="flex-grow border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="input flex-grow"
                 disabled={loadingFetch}
               />
               <button
                 type="submit"
                 disabled={loadingFetch}
-                className={`px-4 py-2 rounded text-white ${
-                  loadingFetch
-                    ? "bg-indigo-300 cursor-not-allowed"
-                    : "bg-indigo-600 hover:bg-indigo-700"
-                } transition`}
+                className="button button-primary ml-2"
               >
                 {loadingFetch ? "Sending..." : "Send"}
               </button>
             </div>
           </form>
         )}
-      </main>
+      </div>
     </div>
   );
 }
 
-// -----------------------------------------------------------------------------
-// 4) FlashcardCard Component (interactive embed + MCQs + flip animation)
-// -----------------------------------------------------------------------------
+// --- FlashcardCard Component (flip‐animation using your globals.css) ------------
 
 interface FlashcardCardProps {
   fc: FlashcardParsed;
@@ -872,29 +800,38 @@ function FlashcardCard({ fc, index, onComplete }: FlashcardCardProps) {
     });
     setCorrectCount(correct);
     setShowResults(true);
-    // Mark this flashcard as submitted
     onComplete();
   };
 
   return (
-    <div className="flip-card mb-8">
-      <div className={`flip-card-inner ${showResults ? "flipped" : ""}`}>
-        {/* FRONT SIDE: Video + Description + MCQs */}
-        <div className="flip-card-front bg-white border border-gray-200 rounded-lg shadow-sm p-4">
-          {fc.videoUrl && (
-            <div className="aspect-w-16 aspect-h-9 mb-4">
+    // By adding `min-h-[350px]`, each flashcard container has at least 350px height.
+    <div className="flashcard-container min-h-[350px] mb-8">
+      <div className={`flashcard ${showResults ? "is-flipped" : ""}`}>
+        {/* FRONT FACE */}
+        <div className="flashcard-face flashcard-front">
+          {fc.videoUrl ? (
+            // This ensures the iframe is always a 16:9 box.
+            <div className="relative w-full pb-[56.25%] mb-4">
               <iframe
                 src={fc.videoUrl.replace("watch?v=", "embed/")}
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                 allowFullScreen
-                className="w-full h-full rounded"
+                className="absolute top-0 left-0 w-full h-full rounded-lg"
                 title="YouTube Video"
               />
             </div>
+          ) : (
+            // If no valid videoUrl, show a placeholder
+            <div className="h-48 bg-gray-200 text-center flex items-center justify-center rounded-lg mb-4">
+              <span className="font-body text-text-secondary">
+                (no video URL provided)
+              </span>
+            </div>
           )}
-          <div className="mb-4">
+
+          <div className="mb-4 space-y-2 flashcard-content-scrollable">
             {fc.descriptionLines.map((line, idx) => (
-              <p key={idx} className="text-gray-800 whitespace-pre-wrap">
+              <p key={idx} className="font-body text-text-secondary">
                 {line}
               </p>
             ))}
@@ -903,10 +840,10 @@ function FlashcardCard({ fc, index, onComplete }: FlashcardCardProps) {
           <form onSubmit={handleSubmitAnswers}>
             {fc.questions.map((q, idx) => (
               <div key={idx} className="mb-4">
-                <p className="font-medium mb-2">
+                <p className="font-heading text-base mb-2">
                   {idx + 1}. {q.prompt}
                 </p>
-                <div className="space-y-1">
+                <div className="space-y-2">
                   {q.options.map((opt, optIdx) => {
                     const letter = String.fromCharCode(97 + optIdx);
                     return (
@@ -920,10 +857,12 @@ function FlashcardCard({ fc, index, onComplete }: FlashcardCardProps) {
                           value={letter}
                           checked={answers.get(idx) === letter}
                           onChange={() => handleOptionChange(idx, letter)}
-                          className="h-4 w-4 text-indigo-600 border-gray-300 rounded"
+                          className="h-5 w-5 text-secondary-dark border-gray-300 rounded-full focus:ring-secondary-dark"
                           disabled={showResults}
                         />
-                        <span className="text-gray-700">{opt}</span>
+                        <span className="font-body text-text-secondary">
+                          {opt}
+                        </span>
                       </label>
                     );
                   })}
@@ -934,80 +873,65 @@ function FlashcardCard({ fc, index, onComplete }: FlashcardCardProps) {
             <button
               type="submit"
               disabled={!allAnswered || showResults}
-              className={`w-full py-2 rounded-md text-white ${
+              className={`button w-full ${
                 !allAnswered || showResults
-                  ? "bg-indigo-300 cursor-not-allowed"
-                  : "bg-indigo-600 hover:bg-indigo-700"
-              } transition`}
+                  ? "opacity-50 cursor-not-allowed"
+                  : "button-primary"
+              }`}
             >
               Submit Answers
             </button>
           </form>
         </div>
 
-        {/* BACK SIDE: Results + “Review Again” */}
-        <div
-          className="flip-card-back bg-white border border-gray-200 rounded-lg shadow-sm p-4"
-          style={{ transform: "rotateY(180deg)" }}
-        >
-          <h3 className="text-lg font-semibold mb-2">Results</h3>
-          <p className="mb-4">
+        {/* BACK FACE */}
+        <div className="flashcard-face flashcard-back">
+          <h3 className="text-xl font-heading mb-3 text-secondary-dark">
+            Results
+          </h3>
+          <p className="mb-4 font-body">
             You answered {correctCount} out of {fc.questions.length} correctly.
           </p>
-          {fc.questions.map((q, idx) => {
-            const userChoice = answers.get(idx);
-            const isCorrect = userChoice === q.correct;
-            return (
-              <div key={idx} className="mb-3">
-                <p className="font-medium">
-                  {idx + 1}. {q.prompt}
-                </p>
-                {q.options.map((opt, optIdx) => {
-                  const letter = String.fromCharCode(97 + optIdx);
-                  let textClass = "text-gray-800";
-                  if (letter === q.correct) textClass = "text-green-600";
-                  else if (letter === userChoice && !isCorrect)
-                    textClass = "text-red-600";
-                  return (
-                    <p key={optIdx} className={`ml-4 ${textClass}`}>
-                      {letter}) {opt}
-                    </p>
-                  );
-                })}
-                <p className="italic text-sm mt-1">
-                  Your answer: {userChoice?.toUpperCase() ?? "–"} | Correct:{" "}
-                  {q.correct.toUpperCase()}
-                </p>
-              </div>
-            );
-          })}
-
+          <div className="space-y-4 flashcard-content-scrollable">
+            {fc.questions.map((q, idx) => {
+              const userChoice = answers.get(idx);
+              const isCorrect = userChoice === q.correct;
+              return (
+                <div key={idx}>
+                  <p className="font-heading mb-1">
+                    {idx + 1}. {q.prompt}
+                  </p>
+                  {q.options.map((opt, optIdx) => {
+                    const letter = String.fromCharCode(97 + optIdx);
+                    let textClass = "text-text-primary";
+                    if (letter === q.correct) textClass = "text-tertiary";
+                    else if (letter === userChoice && !isCorrect)
+                      textClass = "text-error";
+                    return (
+                      <p
+                        key={optIdx}
+                        className={`ml-4 ${textClass} font-body`}
+                      >
+                        {letter}) {opt}
+                      </p>
+                    );
+                  })}
+                  <p className="italic text-sm mt-1 font-body">
+                    Your answer: {userChoice?.toUpperCase() ?? "–"} | Correct:{" "}
+                    {q.correct.toUpperCase()}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
           <button
             onClick={() => setShowResults(false)}
-            className="mt-4 w-full py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition"
+            className="button button-primary mt-4"
           >
             Review Again
           </button>
         </div>
       </div>
-
-      {/* Styles for 3D flip */}
-      <style jsx>{`
-        .flip-card {
-          perspective: 1000px;
-        }
-        .flip-card-inner {
-          transform-style: preserve-3d;
-          transition: transform 0.6s ease-in-out;
-        }
-        .flipped {
-          transform: rotateY(180deg);
-        }
-        .flip-card-front,
-        .flip-card-back {
-          backface-visibility: hidden;
-        }
-      `}</style>
     </div>
   );
 }

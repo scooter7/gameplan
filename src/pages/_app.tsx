@@ -1,30 +1,32 @@
 // /src/pages/_app.tsx
 
 import { useState } from "react";
-import type { AppProps } from "next/app";
-import {
-  SessionContextProvider,
-  Session,
-} from "@supabase/auth-helpers-react";
 import { createPagesBrowserClient } from "@supabase/auth-helpers-nextjs";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import "../styles/globals.css";
+import { SessionContextProvider } from "@supabase/auth-helpers-react";
 
-type MyAppProps = AppProps<{
-  initialSession: Session | null;
-}>;
+// ────────────────────────────────────────────────────────────────────────────────
+// 1) Import your globals.css _before_ anything else that relies on Tailwind or your
+//    @font-face declarations. This file must contain the `@tailwind base;` /
+//    `@tailwind components;` / `@tailwind utilities;` directives, plus all of your
+//    custom CSS variables, .button, .card, .flashcard, and background classes.
+// ────────────────────────────────────────────────────────────────────────────────
+import "@/styles/globals.css";
 
-export default function MyApp({ Component, pageProps }: MyAppProps) {
-  // Use the new “pages” helper instead of createBrowserSupabaseClient
-  const [supabaseClient] = useState<SupabaseClient>(() =>
-    createPagesBrowserClient()
-  );
+import type { AppProps } from "next/app";
+
+export default function App({ Component, pageProps }: AppProps) {
+  // ──────────────────────────────────────────────────────────────────────────────
+  // 2) Initialize Supabase client for “Pages Router”
+  //    (we switched to createPagesBrowserClient instead of the deprecated createBrowserSupabaseClient)
+  // ──────────────────────────────────────────────────────────────────────────────
+  const [supabaseClient] = useState(() => createPagesBrowserClient());
 
   return (
-    <SessionContextProvider
-      supabaseClient={supabaseClient}
-      initialSession={pageProps.initialSession}
-    >
+    // ────────────────────────────────────────────────────────────────────────────
+    // 3) Wrap the entire app in the SessionContextProvider so any page/component
+    //    can call useUser(), useSession(), etc.
+    // ────────────────────────────────────────────────────────────────────────────
+    <SessionContextProvider supabaseClient={supabaseClient}>
       <Component {...pageProps} />
     </SessionContextProvider>
   );
