@@ -315,6 +315,7 @@ textarea:focus {
 
 /* =============================================================================
    8) PAGE‐SPECIFIC BACKGROUNDS (FOR SIGNIN/REGISTER/PROFILE/CHAT)
+   (We assume you’ll conditionally add these classes on your <main> or <div>)
    ============================================================================= */
 /* Place your images into public/images/ with exactly these names */
 .bg-insights {

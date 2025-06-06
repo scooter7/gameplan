@@ -2,6 +2,7 @@
 
 import { useState, useEffect, ChangeEvent, FormEvent } from "react";
 import { useRouter } from "next/router";
+import Layout from "@/components/Layout";
 import { useUser } from "@supabase/auth-helpers-react";
 import { supabase } from "@/lib/supabaseClient";
 
@@ -204,7 +205,7 @@ export default function IngestPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8 px-4">
+    <Layout>
       <div className="max-w-2xl mx-auto bg-white rounded-lg shadow-md p-6">
         <h1 className="text-2xl font-semibold mb-6">Ingest a Document</h1>
 
@@ -286,6 +287,6 @@ export default function IngestPage() {
           </button>
         </form>
       </div>
-    </div>
+    </Layout>
   );
 }

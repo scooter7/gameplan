@@ -1,5 +1,6 @@
 // /src/pages/chat.tsx
 
+import Layout from "@/components/Layout";
 import { useState, useEffect, useCallback, FormEvent } from "react";
 import { useRouter } from "next/router";
 import { useUser } from "@supabase/auth-helpers-react";
@@ -146,30 +147,156 @@ export default function ChatPage() {
     null
   );
   const [showCompletionButton, setShowCompletionButton] = useState(false);
+  const [urlGameplanInitialized, setUrlGameplanInitialized] = useState<boolean>(false); // This line is already here, ensuring search block is correct
 
-  // --- 1) On mount: verify auth & fetch profile ---------------------------------
+  // --- 1) On mount: verify auth & fetch profile / gameplan --------------------
   useEffect(() => {
-    if (user === undefined) return; // still loading
+    if (user === undefined) {
+      setProfileLoading(true); // Keep loading until user object is resolved
+      return;
+    }
     if (user === null) {
       router.replace("/signin");
       return;
     }
-    const fetchProfile = async () => {
-      const { data: profile, error } = await supabase
+
+    // Ensure router is ready and query params are available
+    if (!router.isReady) {
+      setProfileLoading(true); // Keep loading until router is ready
+      return;
+    }
+
+    const { gameplanId } = router.query;
+
+    const fetchProfileAndInitialData = async () => {
+      // Always fetch profile first
+      const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("full_name")
         .eq("id", user.id)
         .single();
-      if (error || !profile) {
+
+      if (profileError || !profile) {
+        addMessage({ sender: 'bot', type: 'text', text: "We couldn't find your profile. Please complete it before starting a chat." });
         router.replace("/profile");
         return;
       }
       setName(profile.full_name);
-      setStage("selectTopic");
-      setProfileLoading(false);
+
+      if (typeof gameplanId === 'string' && gameplanId) {
+        await loadExistingGameplan(gameplanId);
+      } else {
+        // No gameplanId, proceed to topic selection
+        setStage("selectTopic");
+        setProfileLoading(false);
+      }
     };
-    fetchProfile();
-  }, [user, router]);
+
+    fetchProfileAndInitialData();
+
+  }, [user, router, router.isReady, router.query]); // Added router.isReady and router.query
+
+  // --- Load existing gameplan function ----------------------------------------
+  const loadExistingGameplan = async (id: string) => {
+    setLoadingFetch(true);
+    setProfileLoading(true); // Use profileLoading to gate initial page render
+
+    try {
+      const { data: gameplanData, error: gameplanError } = await supabase
+        .from("gameplans")
+        .select("topic, skill, completed") // raw_flashcards removed
+        .eq("id", id)
+        .eq("user_id", user!.id) // Ensure gameplan belongs to the current user
+        .single();
+
+      if (gameplanError || !gameplanData) {
+        console.error("Error fetching gameplan by ID:", gameplanError);
+        addMessage({
+          sender: "bot",
+          type: "text",
+          text: "Could not load the specified gameplan. It might not exist or you may not have access. Please select a topic to start.",
+        });
+        setStage("selectTopic");
+        setCurrentGameplanId(null); // Ensure no stale gameplan ID
+        setLoadingFetch(false);
+        setProfileLoading(false);
+        return;
+      }
+
+      // Fetch Goals
+      const { data: goalsData, error: goalsError } = await supabase
+        .from("goals")
+        .select("id, description, status")
+        .eq("gameplan_id", id);
+
+      let frontendGoals: FrontendGoal[] = [];
+      if (goalsError) {
+        console.error("Error fetching goals for gameplan:", goalsError);
+        addMessage({
+          sender: "bot",
+          type: "text",
+          text: "There was an error loading the goals for this gameplan. You can continue, but goals may not be available.",
+        });
+      } else if (goalsData) {
+        frontendGoals = goalsData.map((g) => ({
+          id: g.id,
+          description: g.description,
+          status: g.status as FrontendGoal["status"],
+        }));
+      }
+      setCurrentGoals(frontendGoals);
+
+      // Set States
+      setSelectedTopic(gameplanData.topic);
+      setSelectedSkill(gameplanData.skill);
+      setCurrentGameplanId(id);
+
+      // Fetch and Process Flashcards from 'flashcards' table
+      let rawFlashcardStrings: string[] = [];
+      const { data: flashcardRecords, error: flashcardsError } = await supabase
+        .from("flashcards")
+        .select("content") // Assuming 'content' column holds the raw flashcard string
+        .eq("gameplan_id", id);
+
+      if (flashcardsError) {
+        console.error("Error fetching flashcards:", flashcardsError);
+        addMessage({ sender: "bot", type: "text", text: "Could not load flashcards for this gameplan." });
+        // rawFlashcardStrings will remain empty, leading to empty parsed flashcards
+      } else if (flashcardRecords) {
+        rawFlashcardStrings = flashcardRecords.map(fc => fc.content);
+      }
+      
+      const parsedFCs: FlashcardParsed[] = rawFlashcardStrings.map(raw => parseFlashcardContent(raw));
+      setParsedFlashcards(parsedFCs);
+      setFlashcardsSubmitted(Array(parsedFCs.length).fill(false));
+
+      setShowCompletionButton(!gameplanData.completed);
+      // This block should already be correct from the previous agent turn,
+      // but ensuring it's idempotent or matches the intended final state.
+      if (!urlGameplanInitialized) {
+        addMessage({
+          sender: "bot",
+          type: "text",
+          text: `Continuing your gameplan for ${gameplanData.skill}. Let's pick up where you left off!`
+        });
+        setUrlGameplanInitialized(true);
+      }
+      setStage("chat");
+
+    } catch (error) {
+        console.error("Unexpected error in loadExistingGameplan:", error);
+        addMessage({
+          sender: "bot",
+          type: "text",
+          text: "An unexpected error occurred while loading your gameplan. Please try selecting a topic.",
+        });
+        setStage("selectTopic");
+        setCurrentGameplanId(null);
+    } finally {
+      setLoadingFetch(false);
+      setProfileLoading(false);
+    }
+  };
 
   // --- 2) Helper: append message to chat ----------------------------------------
   const addMessage = useCallback((msg: TextMessage) => {
@@ -401,6 +528,7 @@ export default function ChatPage() {
         // 7e) Save gameplanId & show “complete” button
         setCurrentGameplanId(gameplanId);
         setShowCompletionButton(true);
+        setUrlGameplanInitialized(false); // New gameplan, not from URL (ensure this line is present)
         setStage("chat");
       } else {
         addMessage({
@@ -409,6 +537,7 @@ export default function ChatPage() {
           text: `Error: ${(json as any).error ?? "Unable to generate game plan."
             }`,
         });
+        setUrlGameplanInitialized(false); // Reset flag (ensure this line is present)
         setStage("chat");
       }
     } catch (error) {
@@ -418,6 +547,7 @@ export default function ChatPage() {
         type: "text",
         text: "Sorry, I couldn’t generate a game plan right now. Please try again later.",
       });
+      setUrlGameplanInitialized(false); // Reset flag (ensure this line is present)
       setStage("chat");
     } finally {
       setLoadingFetch(false);
@@ -559,6 +689,7 @@ export default function ChatPage() {
     setFlashcardsSubmitted([]);
     setSelectedTopic(null);
     setSelectedSkill(null);
+    setUrlGameplanInitialized(false); // Ensure this line is present
 
     setStage("selectTopic");
     addMessage({
@@ -576,11 +707,12 @@ export default function ChatPage() {
   // --- RENDER ---------------------------------------------------------------------
 
   return (
-    <div className="bg-gray-100">
-      <div className="mx-auto my-6 w-full max-w-4xl bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        {/* ---------- HEADER ---------- */}
+    <Layout>
+      <div className="bg-gray-100">
+        <div className="mx-auto my-6 w-full max-w-4xl bg-white rounded-xl shadow-md border border-gray-200 p-6">
+          {/* ---------- HEADER ---------- */}
         <header className="mb-6 pb-4 border-b border-gray-200">
-          <h1 className="text-xl font-bold text-gray-900">
+          <h1 className="text-2xl font-bold text-gray-900">
             Chatting about: {selectedSkill || selectedTopic || "AI Coaching"}
           </h1>
           <p className="text-sm text-gray-500 mt-1">
@@ -600,7 +732,7 @@ export default function ChatPage() {
               {currentGoals.map((goal) => (
                 <li
                   key={goal.id}
-                  className="flex justify-between items-center bg-gray-100 rounded-lg p-3"
+                  className="flex justify-between items-center p-4 border-b border-gray-200 last:border-b-0"
                 >
                   <span className="text-gray-800">{goal.description}</span>
                   <select
@@ -646,9 +778,9 @@ export default function ChatPage() {
                 }`}
             >
               <div
-                className={`max-w-xl px-4 py-3 rounded-2xl ${msg.sender === "user"
-                    ? "bg-blue-500 text-white rounded-br-none"
-                    : "bg-gray-200 text-gray-900 rounded-bl-none"
+                className={`max-w-xl px-4 py-3 ${msg.sender === "user"
+                    ? "bg-blue-500 text-white rounded-2xl rounded-br-lg" // Changed bg-secondary to bg-blue-500
+                    : "bg-surface text-text-primary border border-gray-200 rounded-2xl rounded-bl-lg"
                   }`}
               >
                 <p className="whitespace-pre-wrap">{msg.text}</p>
@@ -746,28 +878,29 @@ export default function ChatPage() {
 
         {/* ---------- CHAT INPUT FORM ---------- */}
         {stage === 'chat' && (
-          <form onSubmit={handleChatSubmit} className="mt-8">
-            <div className="flex items-center p-1 border border-gray-300 rounded-xl">
+          <form onSubmit={handleChatSubmit} className="mt-8"> {/* Consider if mt-8 or div's mt-4 is final margin */}
+            <div className="flex items-center bg-gray-100 p-2 rounded-xl shadow-sm mt-4">
               <input
                 type="text"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 placeholder="Type your message..."
-                className="flex-grow px-3 py-2 bg-transparent border-none focus:ring-0"
+                className="flex-grow px-3 py-3 bg-transparent border-none focus:ring-0 placeholder-gray-500 text-gray-800"
                 disabled={loadingFetch}
               />
               <button
                 type="submit"
                 disabled={loadingFetch || !inputText.trim()}
-                className="px-5 py-2 text-white bg-blue-500 rounded-lg hover:bg-blue-600 disabled:bg-blue-300 disabled:cursor-not-allowed transition-colors"
+                className="px-5 py-3 text-white bg-blue-500 hover:bg-blue-600 rounded-xl transition-colors duration-150 ease-in-out disabled:opacity-50"
               >
                 Send
               </button>
             </div>
           </form>
         )}
+        </div>
       </div>
-    </div>
+    </Layout>
   );
 }
 

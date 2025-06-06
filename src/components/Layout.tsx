@@ -35,13 +35,13 @@ export default function Layout({ children }: LayoutProps) {
   return (
     <div className="flex flex-col min-h-screen bg-background text-text-secondary">
       {/* Top navigation bar */}
-      <nav className="bg-primary text-white p-4 shadow-md">
+      <nav className="bg-surface text-text-primary p-6 shadow-md">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
-          <Link href="/">
-            <a className="text-lg font-heading">Liferramp360</a>
+          <Link href="/" legacyBehavior>
+            <a className="font-heading">Liferramp360</a>
           </Link>
           <div className="space-x-4">
-            <Link href="/chat">
+            <Link href="/chat" legacyBehavior>
               <a
                 className={`hover:underline ${
                   router.pathname === "/chat" ? "font-bold" : ""
@@ -50,7 +50,7 @@ export default function Layout({ children }: LayoutProps) {
                 Chat
               </a>
             </Link>
-            <Link href="/portfolio">
+            <Link href="/portfolio" legacyBehavior>
               <a
                 className={`hover:underline ${
                   router.pathname.startsWith("/portfolio") ? "font-bold" : ""
@@ -59,13 +59,22 @@ export default function Layout({ children }: LayoutProps) {
                 Portfolio
               </a>
             </Link>
-            <Link href="/ingest">
+            <Link href="/ingest" legacyBehavior>
               <a
                 className={`hover:underline ${
                   router.pathname === "/ingest" ? "font-bold" : ""
                 }`}
               >
                 Ingest
+              </a>
+            </Link>
+            <Link href="/profile" legacyBehavior>
+              <a
+                className={`hover:underline ${
+                  router.pathname === "/profile" ? "font-bold" : ""
+                }`}
+              >
+                Profile
               </a>
             </Link>
             <button

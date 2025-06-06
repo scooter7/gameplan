@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { createPagesBrowserClient } from "@supabase/auth-helpers-nextjs";
-import { SessionContextProvider } from "@supabase/auth-helpers-react";
+import { SessionContextProvider, useSessionContext } from "@supabase/auth-helpers-react";
 
 // ────────────────────────────────────────────────────────────────────────────────
 // 1) Import your globals.css _before_ anything else that relies on Tailwind or your
@@ -27,7 +27,31 @@ export default function App({ Component, pageProps }: AppProps) {
     //    can call useUser(), useSession(), etc.
     // ────────────────────────────────────────────────────────────────────────────
     <SessionContextProvider supabaseClient={supabaseClient}>
-      <Component {...pageProps} />
+      <AppContentWrapper Component={Component} pageProps={pageProps} />
     </SessionContextProvider>
   );
+}
+
+// New wrapper component to handle initial session loading
+function AppContentWrapper({ Component, pageProps }: AppProps) {
+  const { isLoading } = useSessionContext(); // `session` could also be extracted if needed elsewhere
+
+  if (isLoading) {
+    // Global loading indicator
+    return (
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100vh', 
+        fontFamily: 'sans-serif',
+        backgroundColor: 'var(--color-background)', // Using CSS variable from globals.css
+        color: 'var(--color-text-primary)' // Using CSS variable from globals.css
+      }}>
+        Loading...
+      </div>
+    );
+  }
+
+  return <Component {...pageProps} />;
 }
