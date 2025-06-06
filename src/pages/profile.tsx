@@ -1,248 +1,198 @@
 // /src/pages/profile.tsx
 
-import { useState, useEffect, FormEvent } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/router";
 import { useUser } from "@supabase/auth-helpers-react";
 import { supabase } from "@/lib/supabaseClient";
 
-type RoleOption =
-  | "High School Student"
-  | "College Student"
-  | "Young Professional"
-  | "Mid-Career Professional"
-  | "Late-Career Professional";
-
-type GenderOption = "Male" | "Female" | "Non-Binary" | "Prefer Not to Say";
-
-const roleOptions: RoleOption[] = [
-  "High School Student",
-  "College Student",
-  "Young Professional",
-  "Mid-Career Professional",
-  "Late-Career Professional",
-];
-
-const genderOptions: GenderOption[] = [
-  "Male",
-  "Female",
-  "Non-Binary",
-  "Prefer Not to Say",
-];
-
-const topicOptions = [
-  "Leadership",
-  "Resilience",
-  "Collaboration",
-  "Communication",
-  "Personal Well Being",
-  "Critical Thinking",
-  "Career Development",
-  "Global Fluency",
-  "Creativity",
-  "Technology",
-];
-
-export default function Profile() {
+export default function ProfilePage() {
   const user = useUser();
   const router = useRouter();
 
   // Form state
-  const [name, setName] = useState<string>("");
-  const [role, setRole] = useState<RoleOption>("High School Student");
-  const [gender, setGender] = useState<GenderOption>("Prefer Not to Say");
-  const [age, setAge] = useState<number | "">( "");
-  const [topics, setTopics] = useState<string[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [errorMsg, setErrorMsg] = useState<string>("");
+  const [fullName, setFullName] = useState("");
+  const [role, setRole] = useState<"high-school" | "college" | "young-professional" | "mid-career" | "late-career">("high-school");
+  const [gender, setGender] = useState<"male" | "female" | "other">("male");
+  const [age, setAge] = useState<number | "">("");
 
-  // Check for existing profile; if exists, redirect to /chat
+  // Loading / error state
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // If the user is not signed in, redirect to /signin
   useEffect(() => {
-    if (user === undefined) return; // still loading auth state
-
+    if (user === undefined) return; // still checking
     if (user === null) {
       router.replace("/signin");
-      return;
     }
+  }, [user, router]);
 
-    // If user is signed in, check if a profile row already exists
+  // On mount, check if profile already exists; if so, redirect to /chat
+  useEffect(() => {
+    if (!user) return;
     const fetchProfile = async () => {
-      const { data: existingProfile, error } = await supabase
+      setLoading(true);
+      const { data: profile, error } = await supabase
         .from("profiles")
         .select("id")
         .eq("id", user.id)
         .single();
 
-      if (error && error.code !== "PGRST116") {
-        // PGRST116 = no rows found; ignore that here
-        console.error("Error checking profile:", error.message);
-      }
-
-      if (existingProfile) {
+      if (profile && !error) {
+        // If a profile row exists, skip form and go to /chat
         router.replace("/chat");
       }
+      setLoading(false);
     };
-
     fetchProfile();
   }, [user, router]);
 
-  const handleTopicToggle = (topic: string) => {
-    setTopics((prev) =>
-      prev.includes(topic)
-        ? prev.filter((t) => t !== topic)
-        : [...prev, topic]
-    );
-  };
-
-  const handleSubmit = async (e: FormEvent) => {
+  // Handle form submission
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErrorMsg("");
 
     // Basic validation
-    if (!name.trim()) {
-      setErrorMsg("Please enter your name.");
+    if (!fullName.trim()) {
+      setErrorMsg("Please enter your full name.");
       return;
     }
-    if (age === "" || typeof age === "number" ? age < 1 : true) {
+    if (!age || age < 1) {
       setErrorMsg("Please enter a valid age.");
       return;
     }
-    if (topics.length === 0) {
-      setErrorMsg("Select at least one topic you'd like to discuss.");
-      return;
-    }
 
+    setErrorMsg(null);
     setLoading(true);
 
-    // Insert new profile row using user's UUID as PK
     const { error } = await supabase.from("profiles").insert({
       id: user!.id,
-      full_name: name.trim(),
+      full_name: fullName.trim(),
       role,
       gender,
       age: Number(age),
-      topics,
+      // NOTE: no 'topics' column anymore
     });
 
     if (error) {
-      console.error("Error inserting profile:", error.message);
-      setErrorMsg("There was an error saving your profile. Please try again.");
+      console.error("Error inserting profile:", error);
+      setErrorMsg("Failed to save profile — please try again.");
       setLoading(false);
     } else {
+      // Successfully created profile → redirect to /chat
       router.replace("/chat");
     }
   };
 
-  // While auth status is loading, render nothing
-  if (!user) {
-    return null;
+  if (loading || user === undefined) {
+    return null; // or a spinner
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-      <div className="max-w-lg w-full bg-white rounded-lg shadow-md p-8">
-        <h1 className="text-2xl font-semibold text-center mb-6">
+    <div className="flex items-center justify-center min-h-screen bg-gray-100">
+      <div className="bg-white p-8 rounded-lg shadow-lg w-full max-w-md">
+        <h1 className="text-2xl font-semibold mb-6 text-center">
           Complete Your Profile
         </h1>
 
         {errorMsg && (
-          <div className="mb-4 px-4 py-2 bg-red-100 text-red-700 rounded">
-            {errorMsg}
-          </div>
+          <div className="mb-4 text-red-600 font-medium">{errorMsg}</div>
         )}
 
-        <form onSubmit={handleSubmit}>
-          {/* Name */}
-          <label htmlFor="name" className="block text-sm font-medium mb-1">
-            Full Name
-          </label>
-          <input
-            id="name"
-            type="text"
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full border border-gray-300 rounded px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Full Name */}
+          <div>
+            <label htmlFor="fullName" className="block font-medium mb-1">
+              Full Name
+            </label>
+            <input
+              id="fullName"
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="Your full name"
+              required
+            />
+          </div>
 
           {/* Role */}
-          <label htmlFor="role" className="block text-sm font-medium mb-1">
-            I am a:
-          </label>
-          <select
-            id="role"
-            value={role}
-            onChange={(e) => setRole(e.target.value as RoleOption)}
-            className="w-full border border-gray-300 rounded px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            {roleOptions.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </select>
+          <div>
+            <label htmlFor="role" className="block font-medium mb-1">
+              What best describes you?
+            </label>
+            <select
+              id="role"
+              value={role}
+              onChange={(e) =>
+                setRole(e.target.value as
+                  | "high-school"
+                  | "college"
+                  | "young-professional"
+                  | "mid-career"
+                  | "late-career")
+              }
+              className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="high-school">High School Student</option>
+              <option value="college">College Student</option>
+              <option value="young-professional">Young Professional</option>
+              <option value="mid-career">Mid-Career Professional</option>
+              <option value="late-career">Late-Career Professional</option>
+            </select>
+          </div>
 
           {/* Gender */}
-          <label htmlFor="gender" className="block text-sm font-medium mb-1">
-            Gender
-          </label>
-          <select
-            id="gender"
-            value={gender}
-            onChange={(e) => setGender(e.target.value as GenderOption)}
-            className="w-full border border-gray-300 rounded px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            {genderOptions.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </select>
+          <div>
+            <label htmlFor="gender" className="block font-medium mb-1">
+              Gender
+            </label>
+            <select
+              id="gender"
+              value={gender}
+              onChange={(e) =>
+                setGender(e.target.value as "male" | "female" | "other")
+              }
+              className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+              <option value="other">Other / Prefer not to say</option>
+            </select>
+          </div>
 
           {/* Age */}
-          <label htmlFor="age" className="block text-sm font-medium mb-1">
-            Age
-          </label>
-          <input
-            id="age"
-            type="number"
-            min={1}
-            required
-            value={age}
-            onChange={(e) => setAge(e.target.value === "" ? "" : Number(e.target.value))}
-            className="w-full border border-gray-300 rounded px-3 py-2 mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
+          <div>
+            <label htmlFor="age" className="block font-medium mb-1">
+              Age
+            </label>
+            <input
+              id="age"
+              type="number"
+              min={1}
+              value={age}
+              onChange={(e) =>
+                setAge(e.target.value === "" ? "" : Number(e.target.value))
+              }
+              className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="Your age"
+              required
+            />
+          </div>
 
-          {/* Topics Multi-Select */}
-          <fieldset className="mb-4">
-            <legend className="text-sm font-medium mb-2">
-              Which of the following would you like to talk about today?
-            </legend>
-            <div className="grid grid-cols-2 gap-2">
-              {topicOptions.map((topic) => (
-                <label key={topic} className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={topics.includes(topic)}
-                    onChange={() => handleTopicToggle(topic)}
-                    className="h-4 w-4 text-indigo-600 border-gray-300 rounded"
-                  />
-                  <span className="text-gray-700">{topic}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className={`w-full py-2 rounded-md text-white ${
-              loading
-                ? "bg-indigo-300 cursor-not-allowed"
-                : "bg-indigo-600 hover:bg-indigo-700"
-            } transition`}
-          >
-            {loading ? "Saving Profile..." : "Save Profile"}
-          </button>
+          {/* Submit Button */}
+          <div className="pt-4">
+            <button
+              type="submit"
+              disabled={loading}
+              className={`w-full py-3 rounded-md text-white ${
+                loading
+                  ? "bg-indigo-300 cursor-not-allowed"
+                  : "bg-indigo-600 hover:bg-indigo-700"
+              } transition`}
+            >
+              {loading ? "Saving..." : "Save Profile"}
+            </button>
+          </div>
         </form>
       </div>
     </div>

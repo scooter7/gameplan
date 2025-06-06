@@ -9,41 +9,38 @@ import { supabase } from "@/lib/supabaseClient";
 // 1) Types & Data Structures
 // -----------------------------------------------------------------------------
 
-// A single multiple‐choice question
 interface MCQ {
   prompt: string;
   options: string[];
   correct: string; // "a", "b", "c", or "d"
 }
 
-// The shape for a parsed flashcard
 interface FlashcardParsed {
   videoUrl: string | null;
   descriptionLines: string[];
   questions: MCQ[];
 }
 
-// Each goal object on the front-end, with its Supabase goal‐row ID:
 interface FrontendGoal {
   id: string;
   description: string;
   status: "not-started" | "in-progress" | "completed";
 }
 
-// Chat message types:
 type TextMessage = {
   sender: "user" | "bot";
   type: "text";
   text: string;
 };
+
 type FlashcardMessage = {
   sender: "bot";
   type: "flashcards";
   flashcards: FlashcardParsed[];
 };
+
 type Message = TextMessage | FlashcardMessage;
 
-// The full list of main topic categories:
 const skillAreaMap: Record<string, string[]> = {
   Leadership: [
     "Transformational Leadership",
@@ -144,7 +141,7 @@ export default function ChatPage() {
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
 
-  // The conversation thread (text bubbles + flashcard messages)
+  // The conversation thread (text bubbles + flashcards)
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState<string>("");
   const [loadingFetch, setLoadingFetch] = useState<boolean>(false);
@@ -168,7 +165,7 @@ export default function ChatPage() {
   const [showCompletionButton, setShowCompletionButton] = useState(false);
 
   // ---------------------------------------------------------------------------
-  // 2a) On mount: verify auth and load profile (just full_name now)
+  // 2a) On mount: verify auth and load profile
   // ---------------------------------------------------------------------------
   useEffect(() => {
     if (user === undefined) return; // still waiting
@@ -199,7 +196,7 @@ export default function ChatPage() {
   }, [user, router]);
 
   // ---------------------------------------------------------------------------
-  // 2b) Helper to append a message to our thread
+  // 2b) Helper to append a message
   // ---------------------------------------------------------------------------
   const addMessage = useCallback((msg: Message) => {
     setMessages((prev) => [...prev, msg]);
@@ -315,11 +312,13 @@ export default function ChatPage() {
 
     setTimeout(() => {
       if (wants) {
+        // First, insert the “generating…” bubble
         addMessage({
           sender: "bot",
           type: "text",
           text: `Great! Generating a week-long game plan for "${selectedSkill}" now...`,
         });
+        // Then call generateGameplan()
         generateGameplan();
       } else {
         addMessage({
@@ -379,7 +378,7 @@ export default function ChatPage() {
   };
 
   // ---------------------------------------------------------------------------
-  // 2g) generateGameplan → store ID, set up goals & flashcards
+  // 2g) generateGameplan → insert goals and flashcards, then push messages
   // ---------------------------------------------------------------------------
   const generateGameplan = async () => {
     setLoadingFetch(true);
@@ -403,7 +402,13 @@ export default function ChatPage() {
           gameplanId: string;
         };
 
-        // 1) Set currentGoals (with initial status “not-started”)
+        // 1) Build the “goals text” and push it as a bot message
+        const goalsTextLines = goals.map((g, idx) => `\n${idx + 1}. ${g.description}`);
+        const goalsText =
+          "Here are your goals for the week:" + goalsTextLines.join("");
+        addMessage({ sender: "bot", type: "text", text: goalsText });
+
+        // 2) Set currentGoals (with initial status “not-started”)
         const frontendGoals: FrontendGoal[] = goals.map((g) => ({
           id: g.id,
           description: g.description,
@@ -411,38 +416,37 @@ export default function ChatPage() {
         }));
         setCurrentGoals(frontendGoals);
 
-        // 2) Set up flashcardsSubmitted (all false initially)
+        // 3) Set up flashcardsSubmitted (all false initially)
         setFlashcardsSubmitted(Array(flashcards.length).fill(false));
-
-        // 3) Show the goals panel
-        //    We also render the goals as part of the UI (not in chat bubbles):
-        //    So we skip adding a “text” message for goals.
 
         // 4) Parse each raw flashcard string into a FlashcardParsed object
         const parsedFCs: FlashcardParsed[] = flashcards.map((raw) =>
           parseFlashcardContent(raw)
         );
 
-        // 5) Add a “flashcards” chat message so the UI plugs them in as interactive cards
+        // 5) Push a “flashcards” chat message so UI renders interactive cards
         addMessage({
           sender: "bot",
           type: "flashcards",
           flashcards: parsedFCs,
         });
 
-        // 6) Store the Supabase gameplanId so we can mark it completed later
+        // 6) Store the Supabase gameplanId
         setCurrentGameplanId(gameplanId);
 
         // 7) Show the “I’ve completed this gameplan” button (initially disabled)
         setShowCompletionButton(true);
+
+        // 8) Switch to “chat” stage so input box appears
+        setStage("chat");
       } else {
         addMessage({
           sender: "bot",
           type: "text",
           text: `Error: ${(json as any).error ?? "Unable to generate game plan."}`,
         });
+        setStage("chat");
       }
-      setStage("chat");
     } catch (error) {
       console.error("Error in /api/gameplan:", error);
       addMessage({
@@ -562,13 +566,13 @@ export default function ChatPage() {
   };
 
   // ---------------------------------------------------------------------------
-  // 2j) Update a goal’s status in Supabase + local state
+  // 2j) Update a goal’s status in Supabase & local state
   // ---------------------------------------------------------------------------
   const updateGoalStatus = async (
     goalId: string,
     newStatus: FrontendGoal["status"]
   ) => {
-    // First update in Supabase
+    // 1) Update in Supabase
     const { error } = await supabase
       .from("goals")
       .update({ status: newStatus })
@@ -584,21 +588,18 @@ export default function ChatPage() {
       return;
     }
 
-    // Then update local state
+    // 2) Update local state
     setCurrentGoals((prev) =>
       prev.map((g) =>
         g.id === goalId
-          ? {
-              ...g,
-              status: newStatus,
-            }
+          ? { ...g, status: newStatus }
           : g
       )
     );
   };
 
   // ---------------------------------------------------------------------------
-  // 2k) Called by each FlashcardCard when it’s been submitted
+  // 2k) Called by each FlashcardCard when submitted
   // ---------------------------------------------------------------------------
   const markFlashcardSubmitted = (index: number) => {
     setFlashcardsSubmitted((prev) => {
@@ -609,21 +610,21 @@ export default function ChatPage() {
   };
 
   // ---------------------------------------------------------------------------
-  // 2l) Determine if all goals are “completed”
+  // 2l) Check if all goals are “completed”
   // ---------------------------------------------------------------------------
   const allGoalsCompleted =
     currentGoals.length > 0 &&
     currentGoals.every((g) => g.status === "completed");
 
   // ---------------------------------------------------------------------------
-  // 2m) Determine if all flashcards have been submitted
+  // 2m) Check if all flashcards have been submitted
   // ---------------------------------------------------------------------------
   const allFlashcardsDone =
     flashcardsSubmitted.length > 0 &&
-    flashcardsSubmitted.every((flag) => flag === true);
+    flashcardsSubmitted.every((flag) => flag);
 
   // ---------------------------------------------------------------------------
-  // 2n) Final eligibility check for “Complete” button
+  // 2n) Eligibility for “Complete” button
   // ---------------------------------------------------------------------------
   const canComplete = allGoalsCompleted && allFlashcardsDone;
 
@@ -635,8 +636,8 @@ export default function ChatPage() {
   }
 
   // ---------------------------------------------------------------------------
-  // 3) Render JSX
-  // ---------------------------------------------------------------------------
+  // 3) Render JSX (Goals panel at top, then conversation/thread)
+  // -----------------------------------------------------------------------------
   return (
     <div className="flex flex-col h-screen bg-gray-100">
       {/* Header */}
@@ -646,7 +647,42 @@ export default function ChatPage() {
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto p-4">
-        {/* Conversation Thread */}
+        {/* 1) Goals Panel (always at top) */}
+        {currentGoals.length > 0 && (
+          <section className="mb-6 bg-white p-4 rounded shadow">
+            <h2 className="text-xl font-medium mb-4">Your Goals</h2>
+            <ul className="space-y-4">
+              {currentGoals.map((goal) => (
+                <li
+                  key={goal.id}
+                  className="flex justify-between items-center border border-gray-200 rounded p-4"
+                >
+                  <div>
+                    <p className="font-medium">{goal.description}</p>
+                  </div>
+                  <div>
+                    <select
+                      value={goal.status}
+                      onChange={(e) =>
+                        updateGoalStatus(
+                          goal.id,
+                          e.target.value as FrontendGoal["status"]
+                        )
+                      }
+                      className="border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    >
+                      <option value="not-started">Not Started</option>
+                      <option value="in-progress">In Progress</option>
+                      <option value="completed">Completed</option>
+                    </select>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {/* 2) Conversation Thread (including flashcards) */}
         <div className="space-y-4 mb-4">
           {messages.map((msg, idx) => {
             if (msg.type === "text") {
@@ -688,44 +724,7 @@ export default function ChatPage() {
           })}
         </div>
 
-        {/* 4) Goals Panel */}
-        {currentGoals.length > 0 && (
-          <section className="mb-6 bg-white p-4 rounded shadow">
-            <h2 className="text-xl font-medium mb-4">Your Goals</h2>
-            <ul className="space-y-4">
-              {currentGoals.map((goal) => (
-                <li
-                  key={goal.id}
-                  className="flex justify-between items-center border border-gray-200 rounded p-4"
-                >
-                  <div>
-                    <p className="font-medium">{goal.description}</p>
-                  </div>
-                  <div>
-                    <select
-                      value={goal.status}
-                      onChange={(e) =>
-                        updateGoalStatus(
-                          goal.id,
-                          e.target.value as FrontendGoal["status"]
-                        )
-                      }
-                      className="border border-gray-300 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      <option value="not-started">Not Started</option>
-                      <option value="in-progress">In Progress</option>
-                      <option value="completed">Completed</option>
-                    </select>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {/* 5) Flashcards Panel is already rendered inside the messages loop above */}
-
-        {/* 6) “I’ve completed this gameplan” Button */}
+        {/* 3) “I’ve completed this gameplan” Button */}
         {showCompletionButton && (
           <div className="mb-6 text-center">
             <button
@@ -748,7 +747,7 @@ export default function ChatPage() {
           </div>
         )}
 
-        {/* 7) Input / Selection Area Based on Stage */}
+        {/* 4) Input / Selection Area Based on Stage */}
         {stage === "selectTopic" && (
           <div className="bg-white p-4 rounded shadow mb-4">
             <h2 className="font-medium mb-2">
@@ -867,16 +866,13 @@ function FlashcardCard({ fc, index, onComplete }: FlashcardCardProps) {
   const handleSubmitAnswers = (e: React.FormEvent) => {
     e.preventDefault();
     let correct = 0;
-
     fc.questions.forEach((q, idx) => {
       const choice = answers.get(idx);
       if (choice === q.correct) correct++;
     });
-
     setCorrectCount(correct);
     setShowResults(true);
-
-    // Inform parent that this flashcard has been submitted
+    // Mark this flashcard as submitted
     onComplete();
   };
 
@@ -896,7 +892,6 @@ function FlashcardCard({ fc, index, onComplete }: FlashcardCardProps) {
               />
             </div>
           )}
-
           <div className="mb-4">
             {fc.descriptionLines.map((line, idx) => (
               <p key={idx} className="text-gray-800 whitespace-pre-wrap">
